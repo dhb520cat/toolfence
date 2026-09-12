@@ -244,5 +244,28 @@ for nm in ("folder_remove_motion_blur", "delete_stills_from_album",
            "delete_clip_mattes", "remove_lut_file", "delete_marker"):
     check(sev_of(nm) == S.R.LOW, f"{nm} 应降为 low(实得 {sev_of(nm)})")
 
+# ---- 自审:toolfence 自己的 MCP server 必须通过自己的检查 ----
+# 一个工具链安全扫描器如果自己不干净,它说的话就不值钱。
+from toolfence.server import TOOLS, RULE_NOTES, call_tool
+self_findings = S.scan_tools(TOOLS, "toolfence/server.py")
+check(not self_findings,
+      f"toolfence 自己的工具必须零发现(实得 {[(x.where, x.rule) for x in self_findings]})")
+check(all(t.get("annotations", {}).get("readOnlyHint") is True for t in TOOLS),
+      "自身每个工具都必须标 readOnlyHint")
+check(all(t.get("annotations", {}).get("destructiveHint") is False for t in TOOLS),
+      "自身每个工具都必须标 destructiveHint: false")
+
+# explain_rule 必须覆盖全部七条规则,且规则名与实际产出的一致
+rule_names = set(RULE_NOTES)
+check(len(rule_names) == 7, f"应覆盖 7 条规则(实得 {len(rule_names)})")
+emitted = {f.rule for f in (
+    S.scan_tools(bad_delete + inj + cred + unb + lying) + S.scan_text(hp, "x.md"))}
+check(emitted <= rule_names | {"BROAD_SURFACE"},
+      f"产出的规则名必须都能被 explain_rule 解释(多出 {emitted - rule_names - {'BROAD_SURFACE'}})")
+for r in rule_names:
+    check(set(call_tool("explain_rule", {"rule": r})) >=
+          {"rule", "detects", "why", "origin", "does_not_fire_on"},
+          f"explain_rule({r}) 字段不全")
+
 print(f"\n  {ok} 条通过, {fail} 条失败")
 sys.exit(1 if fail else 0)

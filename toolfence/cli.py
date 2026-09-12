@@ -238,7 +238,7 @@ def render(findings: list[S.Finding], target: str, n_tools: int, use_color: bool
         lines.append("")
 
     if not findings:
-        lines.append(f"  {c['dim']}未命中任何规则。这不等于安全——只说明这六类问题没出现。{c['off']}")
+        lines.append(f"  {c['dim']}未命中任何规则。这不等于安全——只说明这七条规则没有触发。{c['off']}")
         lines.append("")
     return "\n".join(lines)
 

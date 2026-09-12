@@ -10,6 +10,18 @@ toolfence tools.json                        # scan a tools/list export
 toolfence --endpoint https://host/mcp       # live server — calls tools/list only
 ```
 
+It is also an MCP server, so an agent can audit a server before trusting it:
+
+```json
+{ "mcpServers": { "toolfence": {
+    "command": "python3", "args": ["-m", "toolfence.server"] } } }
+```
+
+Three tools — `scan_repository`, `scan_tool_manifest`, `explain_rule`. All three
+are read-only, declare `readOnlyHint: true` and `destructiveHint: false`, take no
+credentials, and **pass toolfence's own audit with zero findings**. A test asserts
+that they keep doing so.
+
 ## Why
 
 An agent with an inbox can be written to by anyone. An agent with a wallet can
@@ -119,7 +131,7 @@ exit code, so it drops into CI as-is.
 ## Tests
 
 ```bash
-python3 test_toolfence.py      # 50 assertions, 25 of them true negatives
+python3 test_toolfence.py      # 62 assertions, 25 true negatives, plus a self-audit
 ```
 
 MIT.
