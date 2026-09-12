@@ -32,10 +32,41 @@ MAX_TEXT = 400_000
 ALLOWED_RPC = {"tools/list", "initialize"}
 
 
+def _github_token() -> str | None:
+    """按惯例的环境变量取 token;没有就试 gh CLI 已登录的凭证。
+
+    匿名访问 GitHub API 是 60 次/小时,扫几个仓库就用完了。
+    """
+    for var in ("GITHUB_TOKEN", "GH_TOKEN"):
+        if (v := os.environ.get(var)):
+            return v.strip()
+    try:
+        import subprocess
+        r = subprocess.run(["gh", "auth", "token"], capture_output=True,
+                           text=True, timeout=8)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
 def _get(url: str, headers: dict | None = None, timeout: int = 40) -> bytes:
-    req = urllib.request.Request(url, headers={"user-agent": UA, **(headers or {})})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+    h = {"user-agent": UA, **(headers or {})}
+    if "github.com" in url and "authorization" not in {k.lower() for k in h}:
+        if (tok := _github_token()):
+            h["authorization"] = f"Bearer {tok}"
+    req = urllib.request.Request(url, headers=h)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+    except urllib.error.HTTPError as e:
+        if e.code == 403 and "rate limit" in str(e.reason).lower():
+            raise SystemExit(
+                "GitHub 速率限制。匿名访问是 60 次/小时 —— "
+                "设置 GITHUB_TOKEN,或运行 `gh auth login` 后重试。"
+            ) from e
+        raise
 
 
 # ------------------------------------------------------------------ 输入模式
