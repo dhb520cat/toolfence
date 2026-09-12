@@ -48,6 +48,25 @@ CREDENTIAL_FRAGMENTS = (
     "private_key", "credential", "auth_token", "bearer", "session_id",
 )
 
+# 引用型句柄不是凭证。AWS 的 credentials_token 是 get_aws_session_info() 的
+# 返回值,用来证明凭证有效 —— 它本身不含任何密钥。把句柄当凭证报,
+# 等于惩罚那些恰好做对了的设计。
+HANDLE_HINTS = (
+    r"\bfrom\s+\w+\(\)",              # "from get_aws_session_info()"
+    r"\breturned\s+by\b",
+    r"\bobtained\s+from\b",
+    r"\bfrom\s+(?:a\s+)?(?:previous|prior|the)\s+\w*\s*(?:call|tool|step)",
+    r"\bworkflow\s+token\b",
+    r"\bsingle[- ]use\b",
+)
+
+
+def looks_like_handle(param_name: str, desc: str) -> bool:
+    """参数是"另一次调用给的句柄",不是密钥本身。"""
+    if "token" not in param_name.lower():
+        return False
+    return any(re.search(p, desc, re.I) for p in HANDLE_HINTS)
+
 # --- 注入面:工具描述里的指令性语言 ------------------------------------------
 # 工具描述原样进入 LLM 上下文。描述里的祈使句 = 任何能改描述的人都能改 agent 行为。
 IMPERATIVE_PATTERNS = (

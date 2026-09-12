@@ -203,5 +203,30 @@ if got:
     check("DESTRUCTIVE_NO_CONFIRM" not in rules_of(S.scan_tools(got)),
           "带 confirmed 参数的 delete 不该报")
 
+# ---- TRUE NEGATIVE 11(回归):引用型句柄不是凭证 ----
+# 取自 awslabs/mcp 的 ccapi delete_resource 真实参数描述。
+handle = [{"name": "delete_resource", "description": "Delete an AWS resource.",
+           "inputSchema": {"type": "object", "properties": {
+               "identifier": {"type": "string"},
+               "confirmed": {"type": "boolean", "description": "Explicit confirmation"},
+               "credentials_token": {"type": "string", "description":
+                   "Credentials token from get_aws_session_info() to ensure AWS "
+                   "credentials are valid"}}}}]
+f = S.scan_tools(handle)
+check(not f, f"带 confirmed + 句柄 token 的 delete 应完全干净(实得 {[x.rule for x in f]})")
+
+# 真凭证仍要报
+realcred = [{"name": "connect", "description": "Connect.",
+             "inputSchema": {"type": "object", "properties": {
+                 "api_key": {"type": "string", "description": "Your API key"}}}}]
+check("CREDENTIAL_IN_PARAM" in rules_of(S.scan_tools(realcred)), "裸 api_key 仍应报")
+
+# 名字带 token 但描述没说是句柄 —— 仍按凭证处理
+vague = [{"name": "connect", "description": "Connect.",
+          "inputSchema": {"type": "object", "properties": {
+              "auth_token": {"type": "string", "description": "Auth token"}}}}]
+check("CREDENTIAL_IN_PARAM" in rules_of(S.scan_tools(vague)),
+      "未说明来源的 auth_token 仍应报")
+
 print(f"\n  {ok} 条通过, {fail} 条失败")
 sys.exit(1 if fail else 0)

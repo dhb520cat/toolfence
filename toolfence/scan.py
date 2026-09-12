@@ -132,6 +132,8 @@ def _check_params(tool: dict, where: str) -> list[Finding]:
         low = pname.lower()
         pdesc = (pdef or {}).get("description", "") if isinstance(pdef, dict) else ""
 
+        if R.looks_like_handle(pname, pdesc):
+            continue          # 句柄不是凭证
         for frag in R.CREDENTIAL_FRAGMENTS:
             if frag in low:
                 out.append(Finding(
