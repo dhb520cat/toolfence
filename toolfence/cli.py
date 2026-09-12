@@ -25,7 +25,7 @@ from .extract import from_source
 
 UA = "toolfence/0.1 (+https://github.com/dhb520cat/toolfence)"
 TEXT_EXT = {".md", ".markdown", ".txt", ".rst", ".yaml", ".yml", ".json"}
-CODE_EXT = {".ts", ".js", ".tsx", ".mjs", ".py"}
+CODE_EXT = {".ts", ".js", ".tsx", ".mjs", ".py", ".go"}
 MAX_TEXT = 400_000
 
 # 只调这一个方法。工具自身的只读边界,与它检查的东西同一个标准。
@@ -90,7 +90,23 @@ def from_local(root: str) -> tuple[list[dict], list[S.Finding]]:
     return tools, findings
 
 
+# 测试与样例里的工具名是假数据,扫它们只会产生噪音。
+TEST_MARKERS = ("_test.", ".test.", ".spec.", "test_")
+TEST_DIRS = {"test", "tests", "__tests__", "testdata", "fixtures",
+             "examples", "example", "e2e", "mocks", "__mocks__"}
+
+
+def is_test_path(rel: str) -> bool:
+    parts = rel.replace("\\", "/").split("/")
+    if any(p in TEST_DIRS for p in parts):
+        return True
+    base = parts[-1]
+    return any(m in base for m in TEST_MARKERS)
+
+
 def _scan_one(rel: str, text: str, tools: list) -> list:
+    if is_test_path(rel):
+        return []
     ext = os.path.splitext(rel)[1].lower()
     if ext in CODE_EXT:
         tools += from_source(text, rel)

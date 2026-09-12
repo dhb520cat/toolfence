@@ -4,6 +4,7 @@
   TS   server.registerTool("name", { description, inputSchema, annotations }, handler)
   TS   { name: "...", description: "...", inputSchema: {...} }   (数组风格)
   Py   @mcp.tool() / types.Tool(name=..., description=...)
+  Go   mcp.Tool{ Name: "...", Description: ..., Annotations: &mcp.ToolAnnotations{...} }
 
 只做词法级提取,不执行任何代码。提不准就不提 —— 宁可漏,不可错报。
 """
@@ -24,6 +25,62 @@ PY_DECORATOR = re.compile(
     r"""@\w+\.tool\([^)]*\)\s*(?:async\s+)?def\s+(?P<name>\w+)""", re.S)
 PY_TYPES_TOOL = re.compile(
     r"""Tool\(\s*name\s*=\s*["'](?P<name>[\w.\-]+)["']""", re.S)
+
+# ── Go: mcp.Tool{ Name: "x", Description: ..., Annotations: &mcp.ToolAnnotations{} } ──
+GO_TOOL = re.compile(
+    r"""Tool\{\s*(?:[^{}]*?\s)?Name\s*:\s*"(?P<name>[\w.\-]+)"\s*,""", re.S)
+
+# Go 的 annotation 字段是 PascalCase,MCP 规范是 camelCase。
+GO_ANN_MAP = {
+    "ReadOnlyHint": "readOnlyHint", "DestructiveHint": "destructiveHint",
+    "IdempotentHint": "idempotentHint", "OpenWorldHint": "openWorldHint",
+}
+
+
+def _go_string_after(block: str, key: str) -> str:
+    """取 `Key:` 后的字符串。描述常包在 i18n 包装里:t("KEY", "真正的文本")
+    —— 这时要第二个参数,第一个只是翻译键。"""
+    m = re.search(rf"""\b{key}\s*:\s*""", block)
+    if not m:
+        return ""
+    rest = block[m.end():].lstrip()
+    if rest.startswith(("`", '"')):
+        q = rest[0]
+        end = rest.index(q, 1) if q == "`" else _end_of_go_str(rest)
+        return rest[1:end]
+    # t("KEY", "text") / translate("KEY", "text")
+    call = re.match(r"""\w+\(\s*"[^"]*"\s*,\s*""", rest)
+    if call:
+        tail = rest[call.end():]
+        if tail.startswith(('"', "`")):
+            q = tail[0]
+            end = tail.index(q, 1) if q == "`" else _end_of_go_str(tail)
+            return tail[1:end]
+    return ""
+
+
+def _end_of_go_str(s: str) -> int:
+    i = 1
+    while i < len(s):
+        if s[i] == "\\":
+            i += 2
+            continue
+        if s[i] == '"':
+            return i
+        i += 1
+    return len(s) - 1
+
+
+def _go_annotations(block: str) -> dict:
+    m = re.search(r"Annotations\s*:\s*&?\w*\.?ToolAnnotations\{", block)
+    if not m:
+        return {}
+    blk = _balanced(block, block.index("{", m.end() - 1))
+    out = {}
+    for k, v in re.findall(r"(\w+)\s*:\s*(true|false)", blk):
+        if k in GO_ANN_MAP:
+            out[GO_ANN_MAP[k]] = (v == "true")
+    return out
 
 
 def _balanced(text: str, start: int, open_ch="{", close_ch="}") -> str:
@@ -136,6 +193,12 @@ def from_source(text: str, rel: str) -> list[dict]:
                 continue
             add(m.group("name"), _js_string_after(blk, "description"),
                 _js_param_names(blk), _js_annotations(blk))
+
+    elif rel.endswith(".go"):
+        for m in GO_TOOL.finditer(text):
+            blk = _balanced(text, text.rindex("{", 0, m.end()))
+            add(m.group("name"), _go_string_after(blk, "Description"),
+                None, _go_annotations(blk))
 
     elif rel.endswith(".py"):
         for m in PY_DECORATOR.finditer(text):

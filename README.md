@@ -33,17 +33,26 @@ Every rule here came out of an actual audit, not a threat-modelling session:
 Measured, on public repositories:
 
 ```
-modelcontextprotocol/servers    25 tools    5 findings   3 critical
-sooperset/mcp-atlassian         62 tools    0 findings
-upstash/context7                 7 tools    0 findings
-executeautomation/mcp-playwright 37 tools   1 finding
-mendableai/firecrawl-mcp-server 27 tools    2 findings   1 critical
+github/github-mcp-server        114 tools   31 findings   4 critical, 2 high
+sooperset/mcp-atlassian          62 tools    0 findings
+executeautomation/mcp-playwright 37 tools    1 finding
+mendableai/firecrawl-mcp-server  27 tools    2 findings   1 critical
+modelcontextprotocol/servers     25 tools    5 findings   3 critical
+upstash/context7                  7 tools    0 findings
 ```
 
-All four criticals are irreversible deletes with no confirmation affordance
-(`delete_entities`, `delete_observations`, `delete_relations`,
-`firecrawl_monitor_delete`). 62 tools in mcp-atlassian produce zero findings —
-the rules don't fire at everything that moves.
+272 tools across six repositories. Every critical is an irreversible delete with
+no confirmation affordance — `delete_entities`, `delete_file`,
+`delete_pending_pull_request_review`, `firecrawl_monitor_delete` and friends.
+
+The two `INJECTION_SURFACE` findings are real text shipped by
+github-mcp-server: *"**always call this tool** when the user asks for details
+about…"*. That is not a vulnerability, it is a pattern worth naming — a
+description that issues orders rather than describing behaviour, in a string
+that goes verbatim into the model's context.
+
+62 tools in mcp-atlassian produce zero findings. The rules don't fire at
+everything that moves.
 
 ## Precision over recall
 
@@ -58,6 +67,8 @@ found during development are now regression tests:
   boundary is not an unbounded scope.
 - `"paste this in your configuration file"` in an install guide is not a honeypot.
   Only demands for the agent's **own** system prompt count.
+- Test files, fixtures and examples are skipped entirely — `main_test.go` had a
+  tool literally named `delete`.
 
 Explicit annotations beat name inference: `create_directory` declares
 `destructiveHint: false` and is believed.
@@ -66,8 +77,9 @@ Explicit annotations beat name inference: `create_directory` declares
 
 - **Lexical, not semantic.** It reads manifests and source text; it does not
   execute, type-check, or trace data flow.
-- **No Go support yet.** `github/github-mcp-server` extracts 0 tools. TypeScript,
-  JavaScript and Python only.
+- **TypeScript, JavaScript, Python and Go.** Other languages extract nothing —
+  a clean report on a Rust server means the scanner found no tools, not that the
+  server is clean. Tool count is printed so you can tell the difference.
 - **`inputSchema: SomeZodSchema.shape`** hides parameter names; those tools are
   scanned on name and description alone.
 - A clean report means *these seven rules did not fire*. It is not a safety
@@ -88,7 +100,7 @@ exit code, so it drops into CI as-is.
 ## Tests
 
 ```bash
-python3 test_toolfence.py      # 19 assertions, 7 of them true negatives
+python3 test_toolfence.py      # 31 assertions, 12 of them true negatives
 ```
 
 MIT.
