@@ -65,8 +65,17 @@ def _check_destructive(tool: dict, name: str, where: str) -> list[Finding]:
         return []  # 作者想过这件事,不报
 
     if tier == "irreversible":
+        st = R.stakes(name)
+        if st == "low":
+            return [Finding(
+                "DESTRUCTIVE_NO_CONFIRM", R.LOW, where,
+                f"'{name}' 无确认,但作用于应用内可撤销对象",
+                f"工具名命中 '{verb}';宾语看起来是编辑器内对象,通常可 undo",
+                "若宿主应用本身提供撤销,可以不管。若不提供,按写操作对待。",
+            )]
+        sev = R.CRITICAL if st == "high" else R.HIGH
         return [Finding(
-            "DESTRUCTIVE_NO_CONFIRM", R.CRITICAL, where,
+            "DESTRUCTIVE_NO_CONFIRM", sev, where,
             f"不可逆操作 '{name}' 没有任何确认机制",
             f"工具名命中 '{verb}';inputSchema 里没有 confirm/token/dry_run 之类的参数",
             "加一个单次使用的确认令牌:先调 prepare 拿 token,再带 token 调用。"

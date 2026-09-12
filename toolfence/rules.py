@@ -136,6 +136,57 @@ READ_VERBS = (
 )
 
 
+# 严重性取决于**宾语**,不是动词。
+# `delete_resource` 删的是云资源;`folder_remove_motion_blur` 移除的是一个视频
+# 特效。两者都命中 remove/delete,但只有前者值得半夜叫醒人。
+HIGH_STAKES_OBJECTS = (
+    "file", "files", "directory", "dir", "folder", "path",
+    "database", "db", "table", "schema", "index", "collection",
+    "resource", "instance", "cluster", "node", "volume", "disk", "snapshot",
+    "bucket", "object", "blob", "repo", "repository", "branch", "tag", "commit",
+    "user", "account", "role", "policy", "permission", "grant", "key", "secret",
+    "credential", "token", "certificate", "namespace", "deployment", "service",
+    "stack", "infrastructure", "environment", "backup", "record", "entity",
+    "workspace", "project", "organization", "member", "email", "message",
+)
+
+# 应用内的可撤销对象。删掉它们通常有 undo,不构成数据丢失。
+LOW_STAKES_OBJECTS = (
+    "blur", "effect", "filter", "transition", "marker", "bookmark",
+    "highlight", "annotation", "layer", "keyframe", "matte", "lut",
+    "still", "stills", "thumbnail", "preview", "cache", "temp", "tmp",
+    "selection", "cursor", "breakpoint", "watch", "log", "history",
+    "notification", "toast", "tooltip", "label", "color", "style", "theme",
+)
+
+
+def _singular(tok: str) -> str:
+    """够用的复数还原:mattes→matte, policies→policy, buckets→bucket。"""
+    if len(tok) > 4 and tok.endswith("ies"):
+        return tok[:-3] + "y"
+    if len(tok) > 4 and tok.endswith(("ses", "xes", "zes", "ches", "shes")):
+        return tok[:-2]
+    if len(tok) > 3 and tok.endswith("s") and not tok.endswith("ss"):
+        return tok[:-1]
+    return tok
+
+
+def stakes(name: str) -> str:
+    """按宾语判断赌注大小:high / low / unknown。
+
+    低赌注优先于高赌注 —— `delete_clip_mattes` 里 matte 是被删的东西,
+    clip 只是修饰它的。宁可低估严重性,也不要拿假 critical 淹没真 critical。
+    """
+    raw = set(re.split(r"[^a-zA-Z0-9]+",
+                       re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()))
+    tokens = raw | {_singular(t) for t in raw if t}
+    if tokens & set(LOW_STAKES_OBJECTS):
+        return "low"
+    if tokens & set(HIGH_STAKES_OBJECTS):
+        return "high"
+    return "unknown"
+
+
 def classify_destructive(name: str) -> tuple[str, str] | None:
     """返回 (档位, 命中的动词)。
 

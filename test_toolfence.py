@@ -228,5 +228,21 @@ vague = [{"name": "connect", "description": "Connect.",
 check("CREDENTIAL_IN_PARAM" in rules_of(S.scan_tools(vague)),
       "未说明来源的 auth_token 仍应报")
 
+# ---- 严重性由宾语决定,不由动词决定(真实案例)----
+def sev_of(nm):
+    f = S.scan_tools([{"name": nm, "description": "x",
+                       "inputSchema": {"type": "object", "properties": {}}}])
+    return f[0].severity if f else None
+
+# 高赌注:删的是真东西
+for nm in ("delete_resource", "delete_file", "remove_namespace",
+           "delete_repository", "revoke_token"):
+    check(sev_of(nm) == S.R.CRITICAL, f"{nm} 应为 critical(实得 {sev_of(nm)})")
+
+# 低赌注:取自 samuelgursky/davinci-resolve-mcp 的真实工具名
+for nm in ("folder_remove_motion_blur", "delete_stills_from_album",
+           "delete_clip_mattes", "remove_lut_file", "delete_marker"):
+    check(sev_of(nm) == S.R.LOW, f"{nm} 应降为 low(实得 {sev_of(nm)})")
+
 print(f"\n  {ok} 条通过, {fail} 条失败")
 sys.exit(1 if fail else 0)
