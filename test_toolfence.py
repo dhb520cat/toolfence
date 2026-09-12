@@ -178,5 +178,30 @@ sneaky = "Normal looking text.\u200bHidden\u200bmarkers\u200bhere.\u200b" * 3
 f = S.scan_text(sneaky, "docs/readme.md")
 check("HONEYPOT" in rules_of(f), "英文文本里的 ZWSP 仍应报")
 
+# ---- TRUE NEGATIVE 10(回归):Python 函数签名的参数必须提取到 ----
+# 不提取 = has_confirm_affordance 永远返回 None = 每个 Python server 的
+# 破坏性工具都被误报。取自 awslabs/mcp 的 ccapi delete_resource 真实签名。
+from toolfence.extract import from_source
+aws_src = '''
+@mcp.tool()
+async def delete_resource(
+    resource_type: str = Field(
+        description='The AWS resource type (e.g., "AWS::S3::Bucket")'
+    ),
+    identifier: str = Field(description='The primary identifier'),
+    confirmed: bool = Field(description='Explicit confirmation', default=False),
+    credentials_token: str = Field(description='Credentials token'),
+) -> dict:
+    """Delete an AWS resource."""
+'''
+got = from_source(aws_src, "server.py")
+check(len(got) == 1, f"应提取到 1 个工具(实得 {len(got)})")
+if got:
+    params = list((got[0].get("inputSchema") or {}).get("properties", {}))
+    check("confirmed" in params, f"必须提取到 confirmed 参数(实得 {params})")
+    check("Delete an AWS resource" in got[0]["description"], "应提取到 docstring")
+    check("DESTRUCTIVE_NO_CONFIRM" not in rules_of(S.scan_tools(got)),
+          "带 confirmed 参数的 delete 不该报")
+
 print(f"\n  {ok} 条通过, {fail} 条失败")
 sys.exit(1 if fail else 0)

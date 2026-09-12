@@ -164,6 +164,45 @@ def _js_param_names(block: str) -> list[str]:
     return []
 
 
+def _py_params(tail: str) -> list[str]:
+    """从函数签名取参数名。
+
+    形参常带 Field(...) 默认值和跨行的类型标注,所以取配对的 (...) 再扫
+    顶层的 `name:` / `name=` —— 嵌套括号里的不算。
+    """
+    if not tail.startswith("("):
+        i = tail.find("(")
+        if i < 0 or i > 4:
+            return []
+        tail = tail[i:]
+    sig = _balanced(tail, 0, "(", ")")
+    names, depth, buf = [], 0, ""
+    for ch in sig[1:-1]:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if depth == 0 and ch == ",":
+            names.append(buf); buf = ""
+        else:
+            buf += ch
+    names.append(buf)
+    out = []
+    for n in names:
+        n = n.strip()
+        if not n or n.startswith(("*", "#")):
+            continue
+        head = re.match(r"(\w+)\s*[:=]", n) or re.fullmatch(r"(\w+)", n)
+        if head and head.group(1) not in ("self", "cls", "ctx", "context"):
+            out.append(head.group(1))
+    return out
+
+
+def _py_docstring(tail: str) -> str:
+    m = re.search(r'"""(.*?)"""', tail[:4000], re.S)
+    return m.group(1).strip() if m else ""
+
+
 def from_source(text: str, rel: str) -> list[dict]:
     """返回 tools/list 形状的 dict 列表。"""
     tools: list[dict] = []
@@ -202,9 +241,8 @@ def from_source(text: str, rel: str) -> list[dict]:
 
     elif rel.endswith(".py"):
         for m in PY_DECORATOR.finditer(text):
-            tail = text[m.end():m.end() + 900]
-            doc = re.search(r'"""(.*?)"""', tail, re.S)
-            add(m.group("name"), (doc.group(1).strip() if doc else ""))
+            tail = text[m.end():]
+            add(m.group("name"), _py_docstring(tail), _py_params(tail))
         for m in PY_TYPES_TOOL.finditer(text):
             blk = text[m.start():m.start() + 1200]
             d = re.search(r'description\s*=\s*(?:\(\s*)?["\']{1,3}(.*?)["\']{1,3}', blk, re.S)
