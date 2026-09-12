@@ -30,29 +30,38 @@ Every rule here came out of an actual audit, not a threat-modelling session:
 
 ## What it found
 
-Measured, on public repositories:
+A survey of 30 repositories drawn from `punkpeye/awesome-mcp-servers`
+(3,877 entries, filtered to non-archived TS/JS/Python/Go projects by stars).
+21 of them yielded extractable tools — **1,666 tools in total**.
 
 ```
-github/github-mcp-server        114 tools   31 findings   4 critical, 2 high
-sooperset/mcp-atlassian          62 tools    0 findings
-executeautomation/mcp-playwright 37 tools    1 finding
-mendableai/firecrawl-mcp-server  27 tools    2 findings   1 critical
-modelcontextprotocol/servers     25 tools    5 findings   3 critical
-upstash/context7                  7 tools    0 findings
+critical   17    high   96    medium  135    low   20
 ```
 
-272 tools across six repositories. Every critical is an irreversible delete with
-no confirmation affordance — `delete_entities`, `delete_file`,
-`delete_pending_pull_request_review`, `firecrawl_monitor_delete` and friends.
+7 of 21 repositories come back completely clean.
 
-The two `INJECTION_SURFACE` findings are real text shipped by
-github-mcp-server: *"**always call this tool** when the user asks for details
-about…"*. That is not a vulnerability, it is a pattern worth naming — a
-description that issues orders rather than describing behaviour, in a string
-that goes verbatim into the model's context.
+Every remaining critical is an irreversible delete against something that
+matters, with no confirmation affordance in the tool itself:
 
-62 tools in mcp-atlassian produce zero findings. The rules don't fire at
-everything that moves.
+```
+awslabs/mcp                   delete_db_cluster, delete_db_instance
+                              delete_fhir_resource        (health records)
+                              delete_instance_in_study    (medical imaging)
+                              mcp_delete_ecs_infrastructure
+containers/kubernetes-mcp     resources_delete
+cloudflare/mcp-server         container_file_delete
+txn2/kubefwd                  remove_namespace, remove_service
+```
+
+Two `INJECTION_SURFACE` findings are real text shipped by github-mcp-server:
+*"**always call this tool** when the user asks for details about…"*. Not a
+vulnerability — a pattern worth naming, since a description that issues orders
+goes verbatim into the model's context.
+
+**This is a count of patterns, not a list of vulnerabilities.** Most of these
+projects delegate confirmation to the client, which is where MCP's design puts
+it. What the number says is that the tool layer itself carries no guardrail —
+swap in a client that doesn't prompt, and the delete goes through.
 
 ## Precision over recall
 
@@ -69,6 +78,16 @@ found during development are now regression tests:
   Only demands for the agent's **own** system prompt count.
 - Test files, fixtures and examples are skipped entirely — `main_test.go` had a
   tool literally named `delete`.
+- Python signatures are parsed for parameter names. Without them every Python
+  tool looked unguarded; `awslabs/mcp`'s `delete_resource` actually takes a
+  `confirmed` parameter, and the scanner was calling it unprotected.
+- `credentials_token` described as coming *"from get_aws_session_info()"* is a
+  handle, not a secret in transit.
+- ZWNJ (U+200C) is Persian and Arabic orthography, not a hidden-instruction
+  marker. Flagging it fired on every project shipping RTL translations.
+- **Severity follows the object, not the verb.** `folder_remove_motion_blur`
+  is not `delete_db_cluster`. Grading destructive tools by what they act on cut
+  false criticals by 76% (72 → 17) across the survey.
 
 Explicit annotations beat name inference: `create_directory` declares
 `destructiveHint: false` and is believed.
@@ -100,7 +119,7 @@ exit code, so it drops into CI as-is.
 ## Tests
 
 ```bash
-python3 test_toolfence.py      # 31 assertions, 12 of them true negatives
+python3 test_toolfence.py      # 50 assertions, 25 of them true negatives
 ```
 
 MIT.
