@@ -213,12 +213,13 @@ def scan_text(text: str, where: str) -> list[Finding]:
                 ))
                 break
 
-    if re.search(r"[​‌‍⁠﻿]", text):
+    zw = _suspicious_zero_width(text, where)
+    if zw:
         out.append(Finding(
             "HONEYPOT", R.HIGH, where,
             "文本含零宽字符,可能藏有对人类不可见的内容",
-            f"命中 {len(re.findall(r'[​‌‍⁠﻿]', text))} 处零宽字符",
-            "用 `rg -P '[\\x{200b}-\\x{200d}\\x{2060}\\x{feff}]'` 定位后人工核对。",
+            f"命中 {zw} 处零宽字符(已排除 RTL 正字法用法)",
+            "用 `rg -P '[\\x{200b}\\x{200d}\\x{2060}\\x{feff}]'` 定位后人工核对。",
         ))
 
     # 明文(非隐藏)的索取。必须是**祈使句 + 索取**才算 ——
@@ -236,6 +237,26 @@ def scan_text(text: str, where: str) -> list[Finding]:
         ))
         break
     return out
+
+
+# ZWNJ(U+200C)在波斯语/阿拉伯语/乌尔都语里是**正字法的一部分**,不是隐藏内容。
+# 把它当信号会让每一个带 RTL 翻译的项目全部误报。
+_ZW_ALWAYS = "\u200b\u200d\u2060\ufeff"      # ZWSP / ZWJ / word-joiner / BOM
+_ZWNJ = "\u200c"
+_RTL_RANGE = re.compile(r"[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff]")
+_RTL_LOCALE = re.compile(r"(?:^|[/._-])(fa|ar|ur|ps|ku|sd|ckb|he|yi)(?:[._-]|$)", re.I)
+
+
+def _suspicious_zero_width(text: str, where: str) -> int:
+    """返回值得报告的零宽字符数。RTL 语境下的 ZWNJ 不计。"""
+    n = sum(text.count(c) for c in _ZW_ALWAYS)
+    zwnj = text.count(_ZWNJ)
+    if zwnj:
+        rtl_file = bool(_RTL_LOCALE.search(where))
+        rtl_text = len(_RTL_RANGE.findall(text)) > 20
+        if not (rtl_file or rtl_text):
+            n += zwnj
+    return n
 
 
 def sort_findings(fs: list[Finding]) -> list[Finding]:

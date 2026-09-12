@@ -165,5 +165,18 @@ for p in ("pkg/github/issues.go", "src/filesystem/index.ts", "toolfence/scan.py"
           "src/latest/index.ts", "src/protest/main.go"):
     check(not is_test_path(p), f"{p} 不该被当成测试路径")
 
+# ---- TRUE NEGATIVE 9(回归):波斯语 i18n 里的 ZWNJ 是正字法,不是隐藏内容 ----
+# 取自 openclaw/openclaw 的 apps/.i18n/native/fa.json。
+persian = '{"greeting": "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645", ' \
+          '"welcome": "\u062e\u0648\u0634\u200c\u0622\u0645\u062f\u06cc\u062f", ' \
+          '"settings": "\u062a\u0646\u0638\u06cc\u0645\u200c\u0647\u0627"}'
+f = S.scan_text(persian, "apps/.i18n/native/fa.json")
+check(not f, f"波斯语 ZWNJ 不该报(实得 {[x.rule for x in f]})")
+
+# 但英文文档里的零宽空格仍要报
+sneaky = "Normal looking text.\u200bHidden\u200bmarkers\u200bhere.\u200b" * 3
+f = S.scan_text(sneaky, "docs/readme.md")
+check("HONEYPOT" in rules_of(f), "英文文本里的 ZWSP 仍应报")
+
 print(f"\n  {ok} 条通过, {fail} 条失败")
 sys.exit(1 if fail else 0)
