@@ -96,8 +96,21 @@ swap in a client that doesn't prompt, and the delete goes through.
 
 ## Precision over recall
 
-A scanner that flags everything is a scanner nobody reads. Three false positives
-found during development are now regression tests:
+A scanner that flags everything is a scanner nobody reads, and the cost of a
+false positive is asymmetric: one wrong accusation against a careful team and the
+tool is never trusted again.
+
+This one was wrong seven times against real code. **I came within one commit of
+publishing that AWS ships unguarded deletion tools.** `awslabs/mcp` returned
+criticals on `delete_resource`, `delete_fhir_resource` and
+`mcp_delete_ecs_infrastructure`. Reading their source first: `delete_resource`
+takes a `confirmed` parameter, `create_resource` takes `security_scan_token` and
+`skip_security_check`. Their design is careful. The scanner had never parsed
+Python function signatures at all, so every Python tool looked unguarded — a
+systematic false positive across an entire language, exposed only by a real
+codebase.
+
+Each of the seven is now a regression test:
 
 - `list_emails` is not "send an email" — nouns that double as verbs only count in
   the verb slot.
@@ -119,6 +132,11 @@ found during development are now regression tests:
 - **Severity follows the object, not the verb.** `folder_remove_motion_blur`
   is not `delete_db_cluster`. Grading destructive tools by what they act on cut
   false criticals by 76% (72 → 17) across the survey.
+- **It could not see itself.** This README once claimed the server passed its own
+  audit with zero findings. It had not: the tools are declared as dict literals,
+  which the Python extractor did not understand, so it extracted none of them.
+  Fixed, it now finds five tools here and still reports nothing — and a test
+  asserts that the server's own manifest stays clean.
 
 Explicit annotations beat name inference: `create_directory` declares
 `destructiveHint: false` and is believed.
