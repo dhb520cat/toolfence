@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import re
+import warnings
 
 # ── TS: server.registerTool("name", { ... }, handler) ────────────────────────
 TS_REGISTER = re.compile(
@@ -214,9 +215,14 @@ def _py_dict_literals(text: str) -> list[dict]:
     用 ast **解析**,从不 eval —— 这个工具的全部意义就是不执行它读的东西。
     只接受纯字面量;含变量或函数调用的字典跳过,宁可漏也不猜。
     """
+    # ast.parse 对畸形源码会发 SyntaxWarning(无效转义之类),
+    # 那会直接打到用户终端,把一份报告弄脏。扫描器解析别人的代码,
+    # 别人代码里的噪音不该变成我们的输出。
     try:
-        tree = ast.parse(text)
-    except SyntaxError:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            tree = ast.parse(text)
+    except (SyntaxError, ValueError, MemoryError, RecursionError):
         return []
 
     out: list[dict] = []

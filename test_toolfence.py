@@ -350,5 +350,56 @@ check("SSRF" in impl_rules('async function run(args){ return fetch(args.endpoint
       or "SSRF" in impl_rules('async function run(args){ return fetch(args.url); }'),
       "fetch 用参数 URL 仍应报")
 
+# ---- 复合动作:只读动词打头也可能真的删东西(漏报回归)----
+def _sev(nm):
+    f = S.scan_tools([{"name": nm, "inputSchema": {"type": "object", "properties": {}}}])
+    return f[0].severity if f else None
+
+for nm in ("search_and_delete", "list_then_purge", "get_and_remove_file",
+           "find_and_send_email", "query_and_drop_table"):
+    check(_sev(nm) is not None, f"{nm} 是复合动作,必须报(漏报比误报危险)")
+for nm in ("get_deleted_files", "list_delete_jobs", "get_create_fields",
+           "search_send_logs", "list_removed_items", "get_deletion_policy"):
+    check(_sev(nm) is None, f"{nm} 是只读,不该报(实得 {_sev(nm)})")
+
+# ---- 畸形输入不得让扫描崩溃 ----
+for label, tools in [
+    ("name=None", [{"name": None}]),
+    ("name 非字符串", [{"name": 123}]),
+    ("annotations 非 dict", [{"name": "delete_x", "annotations": "yes"}]),
+    ("条目是字符串", ["not-a-dict"]),
+    ("desc 非字符串", [{"name": "delete_x", "description": 99}]),
+    ("param desc 非字符串",
+     [{"name": "d", "inputSchema": {"properties": {"api_key": {"description": 1}}}}]),
+    ("混合垃圾", ["x", None, 42, {"name": "delete_db_cluster"}]),
+]:
+    try:
+        S.scan_tools(tools)
+        check(True, label)
+    except Exception as e:
+        check(False, f"{label} 崩溃: {type(e).__name__}: {e}")
+# 垃圾里的真工具仍要被抓住
+check("DESTRUCTIVE_NO_CONFIRM" in rules_of(
+    S.scan_tools(["x", None, 42, {"name": "delete_db_cluster"}])),
+    "混合垃圾中的真工具仍要被抓住")
+
+# 同一工具的不同拼法必须同判定
+_variants = ["deleteFile", "delete_file", "DeleteFile", "delete-file", "fs.delete_file"]
+check(len({_sev(v) for v in _variants}) == 1,
+      f"驼峰/蛇形/连字符/点分应同判定(实得 {[(v,_sev(v)) for v in _variants]})")
+
+# ---- 只读边界必须是**强制**的,不是文档里的一句话 ----
+from toolfence.cli import _rpc, ALLOWED_RPC
+for blocked in ("tools/call", "resources/read", "prompts/get", "completion/complete"):
+    try:
+        _rpc("http://127.0.0.1:1/nowhere", blocked, timeout=1)
+        check(False, f"{blocked} 必须在发出前被拒")
+    except SystemExit:
+        check(True, f"{blocked} 已拦截")
+    except Exception as e:
+        check(False, f"{blocked} 未被拦,走到了网络层({type(e).__name__})")
+check(ALLOWED_RPC == frozenset({"tools/list", "initialize"}),
+      "只读词汇表不应被悄悄扩大")
+
 print(f"\n  {ok} 条通过, {fail} 条失败")
 sys.exit(1 if fail else 0)

@@ -177,6 +177,8 @@ def stakes(name: str) -> str:
     低赌注优先于高赌注 —— `delete_clip_mattes` 里 matte 是被删的东西,
     clip 只是修饰它的。宁可低估严重性,也不要拿假 critical 淹没真 critical。
     """
+    if not isinstance(name, str):
+        return "unknown"
     raw = set(re.split(r"[^a-zA-Z0-9]+",
                        re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()))
     tokens = raw | {_singular(t) for t in raw if t}
@@ -187,12 +189,23 @@ def stakes(name: str) -> str:
     return "unknown"
 
 
+# 连接词把一个名字变成两个动作。`get_deleted_files` 没有连接词 —— deleted 是形容词;
+# `search_and_delete` 有,后半截是真动作。
+_COMPOUND = re.compile(
+    r"(?:^|[_\-.])(?:and|then|plus|with)[_\-.](?:"
+    + "|".join(IRREVERSIBLE + OUTWARD + AMBIGUOUS_OUTWARD)
+    + r")(?:[_\-.]|$)"
+)
+
+
 def classify_destructive(name: str) -> tuple[str, str] | None:
     """返回 (档位, 命中的动词)。
 
     动词可以出现在任意 token 位置(`git_commit`、`delete_file` 都要能认),
     但**名词歧义的词只认动词位**——否则 `list_emails` 会被当成"发邮件"。
     """
+    if not isinstance(name, str) or not name:
+        return None
     snake = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)      # camelCase → snake
     tokens = [t for t in re.split(r"[^a-zA-Z0-9]+", snake.lower()) if t]
     if not tokens:
@@ -200,9 +213,13 @@ def classify_destructive(name: str) -> tuple[str, str] | None:
     head = tokens[0]
     rest = set(tokens)
 
-    # 动词位是只读动词 → 整个工具是读操作,后面的词是宾语不是动作。
+    # 动词位是只读动词 → 通常整个工具是读操作,后面的词是宾语不是动作:
+    #   get_create_fields = 取「创建时可用的字段」。
+    # **但复合动作是例外**:`search_and_delete`、`list_then_purge` 真的会删东西。
+    # 放过它们是漏报,比误报危险得多 —— 误报只是烦人,漏报是真放行。
     if head in READ_VERBS:
-        return None
+        if not _COMPOUND.search(snake.lower()):
+            return None
 
     for verb in IRREVERSIBLE:
         if verb in rest:
@@ -224,14 +241,19 @@ def classify_destructive(name: str) -> tuple[str, str] | None:
 
 def has_confirm_affordance(tool: dict) -> str | None:
     """工具自身是否提供了确认手段。返回命中的证据,没有则 None。"""
+    if not isinstance(tool, dict):
+        return None
     schema = tool.get("inputSchema") or tool.get("input_schema") or {}
+    if not isinstance(schema, dict):
+        schema = {}
     props = (schema.get("properties") or {}) if isinstance(schema, dict) else {}
     for pname in props:
         low = pname.lower()
         for hint in CONFIRM_HINTS:
             if hint in low:
                 return f"参数 {pname}"
-    desc = (tool.get("description") or "").lower()
+    desc = tool.get("description")
+    desc = desc.lower() if isinstance(desc, str) else ""
     for hint in ("confirmation token", "prepare_destructive", "dry run", "dry-run"):
         if hint in desc:
             return f"描述提及 {hint}"

@@ -4,9 +4,8 @@
 """
 from __future__ import annotations
 
-import json
 import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 
 from . import rules as R
 
@@ -32,8 +31,14 @@ def scan_tools(tools: list[dict], source: str = "tools/list") -> list[Finding]:
     """扫描一份 MCP tools/list 清单。"""
     out: list[Finding] = []
     for tool in tools:
-        name = tool.get("name") or "(unnamed)"
-        desc = tool.get("description") or ""
+        # 清单可能来自手写 JSON 或半坏的导出。跳过不成形的条目,
+        # 而不是让整次扫描因为一行垃圾而崩掉。
+        if not isinstance(tool, dict):
+            continue
+        raw_name = tool.get("name")
+        name = raw_name if isinstance(raw_name, str) and raw_name else "(unnamed)"
+        desc = tool.get("description")
+        desc = desc if isinstance(desc, str) else ""
         where = f"{source}:{name}"
 
         out += _check_destructive(tool, name, where)
@@ -47,7 +52,8 @@ def scan_tools(tools: list[dict], source: str = "tools/list") -> list[Finding]:
 
 def _check_destructive(tool: dict, name: str, where: str) -> list[Finding]:
     hit = R.classify_destructive(name)
-    ann = tool.get("annotations") or {}
+    ann = tool.get("annotations")
+    ann = ann if isinstance(ann, dict) else {}
 
     # 作者显式声明的标注优先于名字推断 —— 显式声明是承诺,不是猜测。
     # 例:官方 create_directory 标了 destructiveHint: false,因为它幂等且不覆盖。
@@ -139,7 +145,8 @@ def _check_params(tool: dict, where: str) -> list[Finding]:
     out = []
     for pname, pdef in props.items():
         low = pname.lower()
-        pdesc = (pdef or {}).get("description", "") if isinstance(pdef, dict) else ""
+        pdesc = pdef.get("description", "") if isinstance(pdef, dict) else ""
+        pdesc = pdesc if isinstance(pdesc, str) else ""
 
         if R.looks_like_handle(pname, pdesc):
             continue          # 句柄不是凭证
@@ -170,9 +177,13 @@ def _check_params(tool: dict, where: str) -> list[Finding]:
 def _check_unbounded(tool: dict, desc: str, where: str) -> list[Finding]:
     schema = tool.get("inputSchema") or tool.get("input_schema") or {}
     props = (schema.get("properties") or {}) if isinstance(schema, dict) else {}
-    blob = desc + " " + " ".join(
-        (p or {}).get("description", "") for p in props.values() if isinstance(p, dict)
-    )
+    parts = [desc if isinstance(desc, str) else ""]
+    for pd in props.values():
+        if isinstance(pd, dict):
+            d = pd.get("description")
+            if isinstance(d, str):
+                parts.append(d)
+    blob = " ".join(parts)
     if R.declares_boundary(blob):
         return []          # 作者已经声明了边界,不再报无界
     out = []
@@ -191,7 +202,7 @@ def _check_unbounded(tool: dict, desc: str, where: str) -> list[Finding]:
 def _check_aggregate(tools: list[dict], source: str) -> list[Finding]:
     """整份清单层面的问题。"""
     out = []
-    names = [t.get("name", "") for t in tools]
+    names = [t.get("name", "") for t in tools if isinstance(t, dict)]
     destructive = [n for n in names if (h := R.classify_destructive(n)) and h[0] != "write"]
     if len(tools) >= 20 and destructive:
         out.append(Finding(
