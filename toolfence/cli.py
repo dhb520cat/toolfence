@@ -22,6 +22,7 @@ import urllib.request
 
 from . import scan as S
 from .extract import from_source
+from .impl import scan_impl
 
 UA = "toolfence/0.1 (+https://github.com/dhb520cat/toolfence)"
 TEXT_EXT = {".md", ".markdown", ".txt", ".rst", ".yaml", ".yml", ".json"}
@@ -141,7 +142,7 @@ def _scan_one(rel: str, text: str, tools: list) -> list:
     ext = os.path.splitext(rel)[1].lower()
     if ext in CODE_EXT:
         tools += from_source(text, rel)
-        return []
+        return scan_impl(text, rel)
     tools += _tools_from_text(rel, text)
     return S.scan_text(text, rel)
 

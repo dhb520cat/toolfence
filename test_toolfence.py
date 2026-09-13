@@ -297,5 +297,58 @@ check("DESTRUCTIVE_NO_CONFIRM" in rules_of(S.scan_tools(got)),
 check(not from_source('TOOLS = [{"name": SOME_VAR, "description": "x"}]', "s.py"),
       "含变量的字典应跳过而不是猜")
 
+# ---- 实现层:真正可利用的漏洞,而不是设计选择 ----
+from toolfence.impl import scan_impl
+
+def impl_rules(src, rel="x.ts"):
+    return {f.rule for f in scan_impl(src, rel)}
+
+# TRUE POSITIVE:模板插值进 shell
+check("COMMAND_INJECTION" in impl_rules(
+    'function run(args){ return execSync(`ls ${args.path}`); }'),
+    "模板插值进 execSync 应报命令注入")
+check("COMMAND_INJECTION" in impl_rules(
+    'def run(args):\n    os.system(f"ls {args[\'path\']}")', "x.py"),
+    "os.system + f-string 应报")
+check("COMMAND_INJECTION" in impl_rules(
+    'def run(args):\n    subprocess.run(cmd, shell=True)  # args.path inside cmd', "x.py"),
+    "shell=True 应报")
+
+# TRUE NEGATIVE:数组形式是安全写法,骂它等于惩罚做对的人
+check(not impl_rules('function run(args){ return execFile("ls", ["-la", args.path]); }'),
+      "execFile 数组形式不该报")
+check(not impl_rules('def run(args):\n    subprocess.run(["ls", args["path"]])', "x.py"),
+      "subprocess 数组形式不该报")
+
+# TRUE NEGATIVE:没有模型可控输入就不是漏洞
+check(not impl_rules('function boot(){ return execSync(`ls ${__dirname}`); }'),
+      "常量插值不该报 —— 没有模型可控输入")
+
+# 有校验时降级而非静默
+guarded = scan_impl(
+    'function run(args){ const p = path.resolve(root, args.path);'
+    ' if(!p.startsWith(root)) throw new Error("outside"); return readFileSync(p); }', "x.ts")
+check(all(f.severity == S.R.LOW for f in guarded) if guarded else True,
+      f"附近有校验应降为 low(实得 {[(f.rule,f.severity) for f in guarded]})")
+
+# SSRF / 路径穿越
+check("SSRF" in impl_rules('function run(args){ return fetch(args.url); }'),
+      "fetch 直接用参数应报 SSRF")
+check("PATH_TRAVERSAL" in impl_rules(
+    'def run(args):\n    return open(args["path"]).read()', "x.py"),
+    "open 直接用参数应报路径穿越")
+
+# TRUE NEGATIVE(回归):名字恰好叫 request 的普通函数不是 HTTP 客户端
+# 取自 cloudflare/mcp-server-cloudflare 的真实代码。
+check(not impl_rules(
+    'async function run(params){ return request(params.gateway_id, params.log_id, {}); }'),
+    "内部 request() 调用不该报 SSRF")
+# 但真的 HTTP 客户端仍要报
+check("SSRF" in impl_rules('async function run(args){ return axios.get(args.url); }'),
+      "axios.get(args.url) 仍应报")
+check("SSRF" in impl_rules('async function run(args){ return fetch(args.endpoint); }')
+      or "SSRF" in impl_rules('async function run(args){ return fetch(args.url); }'),
+      "fetch 用参数 URL 仍应报")
+
 print(f"\n  {ok} 条通过, {fail} 条失败")
 sys.exit(1 if fail else 0)

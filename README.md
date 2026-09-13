@@ -50,6 +50,14 @@ Every rule here came out of an actual audit, not a threat-modelling session:
 | `PII_EXPOSURE` | Ported from a TEE contract's PII guard — the check that stops personal data reaching an enclave that shouldn't hold it. |
 | `CREDENTIAL_IN_PARAM` | Tool arguments end up in conversation history, logs and telemetry. Secrets belong server-side. |
 | `UNBOUNDED_SCOPE` | Arbitrary path / URL / command / SQL — traversal, SSRF, injection. |
+| `COMMAND_INJECTION` | A tool argument reaching a shell. Declarations are design choices; this is a bug. |
+| `PATH_TRAVERSAL` | A tool argument reaching a filesystem call without a resolved-root check. |
+| `SSRF` | A tool argument reaching an HTTP client without a host allowlist. |
+
+The last three read implementations rather than declarations, and only fire when
+a model-controlled value reaches the sink with no validation nearby. Validation
+in the neighbourhood downgrades the finding to `low` instead of silencing it, so
+you can check whether the guard actually covers that path.
 
 ## What it found
 
@@ -142,7 +150,7 @@ exit code, so it drops into CI as-is.
 ## Tests
 
 ```bash
-python3 test_toolfence.py      # 68 assertions, 25 true negatives, plus a self-audit
+python3 test_toolfence.py      # 80 assertions, 30 true negatives, plus a self-audit
 ```
 
 MIT.
