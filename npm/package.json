@@ -1,0 +1,13 @@
+{
+  "name": "toolfence",
+  "version": "0.3.0",
+  "description": "Security audit for MCP servers and agent tool-chains. Read-only: never executes the code it scans.",
+  "keywords": ["mcp", "model-context-protocol", "security", "audit", "ai-agents", "prompt-injection"],
+  "license": "MIT",
+  "author": "dhb520cat",
+  "homepage": "https://github.com/dhb520cat/toolfence",
+  "repository": { "type": "git", "url": "git+https://github.com/dhb520cat/toolfence.git" },
+  "bin": { "toolfence": "bin/cli.js", "toolfence-mcp": "bin/mcp.js" },
+  "files": ["bin", "vendor", "README.md"],
+  "engines": { "node": ">=18" }
+}
