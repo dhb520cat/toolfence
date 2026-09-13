@@ -130,8 +130,8 @@ Explicit annotations beat name inference: `create_directory` declares
 ## Install
 
 ```bash
-git clone https://github.com/dhb520cat/toolfence && cd toolfence
-python3 -m toolfence.cli --help
+pip install git+https://github.com/dhb520cat/toolfence
+toolfence --help
 ```
 
 No dependencies outside the standard library. Python 3.10+.

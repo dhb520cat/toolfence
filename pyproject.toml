@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toolfence"
+version = "0.3.0"
+description = "Security audit for MCP servers and agent tool-chains. Read-only: never executes the code it scans."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "dhb520cat" }]
+keywords = ["mcp", "model-context-protocol", "security", "audit", "ai-agents", "prompt-injection"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Security",
+  "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/dhb520cat/toolfence"
+Issues = "https://github.com/dhb520cat/toolfence/issues"
+
+[project.scripts]
+toolfence = "toolfence.cli:main"
+
+[tool.setuptools]
+packages = ["toolfence"]
