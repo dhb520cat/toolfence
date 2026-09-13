@@ -401,5 +401,26 @@ for blocked in ("tools/call", "resources/read", "prompts/get", "completion/compl
 check(ALLOWED_RPC == frozenset({"tools/list", "initialize"}),
       "只读词汇表不应被悄悄扩大")
 
+# ---- 危险模式出现在注释/数据表/文档字符串里,不是代码路径 ----
+# 安全工具的规则表长得就像它要找的东西:toolfence 曾把自己的 SHELL_SINKS
+# 报成命令注入,自审因此从 0 发现变成 4 个 critical。
+for label, src, rel, should_fire in [
+    ("真语句 py",   'def run(args):\n    subprocess.run(args["c"], shell=True)', "x.py", True),
+    ("真语句 js",   'function r(args){ return execSync(`ls ${args.p}`); }', "x.ts", True),
+    ("赋值形式",    'def run(args):\n    out = subprocess.check_output(args["c"], shell=True)', "x.py", True),
+    ("注释里",      '# subprocess(args, shell=True) is dangerous', "x.py", False),
+    ("数据表行",    '  (r"shell\\s*=\\s*True", "k", "args params desc"),', "x.py", False),
+    ("文档字符串",  '"""Never call exec.Command("sh","-c", args) here."""', "x.go", False),
+]:
+    got = bool(scan_impl(src, rel))
+    check(got == should_fire, f"{label}: 期望报={should_fire} 实得={got}")
+
+# 构建产物与 vendor 副本不该被重复扫描
+for pth in ("build/lib/toolfence/impl.py", "dist/x.py", "npm/vendor/toolfence/cli.py",
+            "node_modules/x/index.js", "a.egg-info/PKG-INFO", ".venv/lib/x.py"):
+    check(is_test_path(pth), f"{pth} 应被排除(构建产物/副本)")
+check(not is_test_path("src/builder/main.go"), "builder 不是 build,不该排除")
+check(not is_test_path("toolfence/impl.py"), "真源码不该被排除")
+
 print(f"\n  {ok} 条通过, {fail} 条失败")
 sys.exit(1 if fail else 0)

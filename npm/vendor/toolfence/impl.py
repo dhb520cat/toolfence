@@ -93,6 +93,33 @@ def _model_controlled(text: str, pos: int, window: int = 400) -> bool:
     return any(re.search(p, seg) for p in ARG_SOURCES)
 
 
+# 一条危险模式出现在**注释、文档字符串或数据表**里时,那不是代码路径。
+# 安全工具的规则表长得就像它要找的东西 —— toolfence 扫自己时,
+# SHELL_SINKS 里的模式和它们的中文描述都曾被这些规则自己报成命令注入。
+_COMMENT = re.compile(r"^\s*(?:#|//|\*|/\*)")
+# 文档字符串常举反例:"Never call exec.Command(...) here."
+_DOCSTRING_LINE = re.compile(r'^\s*(?:"""|\'\'\'|r"""|r\'\'\')')
+# 数据行:`(r"...", "kind", "描述"),` 这种形状 —— 开头是括号/引号,结尾是逗号。
+_DATA_ROW = re.compile(r"""^\s*[\(\["']""")
+_ROW_END = re.compile(r"""[,\)\]]\s*$""")
+# 真正的语句特征:赋值、return、控制流、独立调用。
+_STATEMENT = re.compile(
+    r"""^\s*(?:return|await|yield|if|elif|while|for|with|assert|raise|"""
+    r"""const |let |var |func |def |[\w.\[\]]+\s*=(?!=))""")
+
+
+def _not_executable(text: str, pos: int) -> bool:
+    """命中点所在行是注释、或是数据表里的一行,而不是会被执行的语句。"""
+    start = text.rfind("\n", 0, pos) + 1
+    end = text.find("\n", pos)
+    line = text[start: end if end != -1 else len(text)]
+    if _COMMENT.search(line) or _DOCSTRING_LINE.search(line):
+        return True
+    if _STATEMENT.search(line):
+        return False          # 看起来是真语句,按代码处理
+    return bool(_DATA_ROW.search(line) and _ROW_END.search(line))
+
+
 def _line_of(text: str, pos: int) -> int:
     return text.count("\n", 0, pos) + 1
 
@@ -115,6 +142,8 @@ def scan_impl(text: str, rel: str) -> list[Finding]:
         for pat, kind, why in sinks:
             for m in re.finditer(pat, text):
                 if not _model_controlled(text, m.start()):
+                    continue
+                if _not_executable(text, m.start()):
                     continue
                 guard = _guarded_near(text, m.start())
                 line = _line_of(text, m.start())

@@ -12,11 +12,10 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 
 from . import scan as S
-from .cli import from_github, from_local, from_endpoint, is_test_path
+from .cli import from_github
 
 PROTOCOL = "2024-11-05"
 

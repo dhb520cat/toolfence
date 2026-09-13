@@ -114,9 +114,10 @@ def from_json_file(path: str) -> tuple[list[dict], list[S.Finding]]:
 
 
 def _iter_local_texts(root: str):
-    skip = {".git", "node_modules", "__pycache__", "dist", "build", ".venv", "target"}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in skip]
+        # 与 is_test_path 用同一份判据 —— 两处列表分头维护必然漂移
+        dirnames[:] = [d for d in dirnames
+                       if d != ".git" and d not in BUILD_DIRS and d not in TEST_DIRS]
         for fn in filenames:
             if os.path.splitext(fn)[1].lower() in TEXT_EXT | CODE_EXT:
                 p = os.path.join(dirpath, fn)
@@ -139,11 +140,16 @@ def from_local(root: str) -> tuple[list[dict], list[S.Finding]]:
 TEST_MARKERS = ("_test.", ".test.", ".spec.", "test_")
 TEST_DIRS = {"test", "tests", "__tests__", "testdata", "fixtures",
              "examples", "example", "e2e", "mocks", "__mocks__"}
+# 构建产物与 vendor 副本是同一份源码的拷贝。扫它们只会把每个工具数两遍,
+# 并把同一个发现报两次。
+BUILD_DIRS = {"build", "dist", "vendor", "vendored", "third_party", "out",
+              "site-packages", ".tox", ".venv", "venv", "target",
+              "node_modules", "bower_components", ".next", ".nuxt", "__pycache__"}
 
 
 def is_test_path(rel: str) -> bool:
     parts = rel.replace("\\", "/").split("/")
-    if any(p in TEST_DIRS for p in parts):
+    if any(p in TEST_DIRS or p in BUILD_DIRS or p.endswith(".egg-info") for p in parts):
         return True
     base = parts[-1]
     return any(m in base for m in TEST_MARKERS)
@@ -177,8 +183,6 @@ def from_github(url: str) -> tuple[list[dict], list[S.Finding]]:
                 continue
             rel = member.name.split("/", 1)[-1]
             if os.path.splitext(rel)[1].lower() not in TEXT_EXT | CODE_EXT:
-                continue
-            if any(part in rel.split("/") for part in ("node_modules", "dist", "build")):
                 continue
             fh = tf.extractfile(member)
             if not fh:

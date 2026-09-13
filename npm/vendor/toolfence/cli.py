@@ -29,8 +29,35 @@ TEXT_EXT = {".md", ".markdown", ".txt", ".rst", ".yaml", ".yml", ".json"}
 CODE_EXT = {".ts", ".js", ".tsx", ".mjs", ".py", ".go"}
 MAX_TEXT = 400_000
 
-# 只调这一个方法。工具自身的只读边界,与它检查的东西同一个标准。
-ALLOWED_RPC = {"tools/list", "initialize"}
+# 只读边界:这个工具对活的 server 只允许发这两个方法。
+# 之前这个常量只是**声明**,没有任何代码执行它 —— 也就是说
+# README 里"从不调 tools/call"靠的是碰巧没写那行,而不是机制。
+# 这正是本工具报别人 DESTRUCTIVE_NO_CONFIRM 的那类问题,所以补上强制。
+ALLOWED_RPC = frozenset({"tools/list", "initialize"})
+
+
+def _rpc(url: str, method: str, timeout: int = 40) -> dict:
+    """对活的 MCP server 发一个 JSON-RPC 请求。越界方法在发出前就被拒绝。"""
+    if method not in ALLOWED_RPC:
+        raise SystemExit(
+            f"blocked: {method} is outside toolfence's read-only vocabulary "
+            f"({', '.join(sorted(ALLOWED_RPC))}). This is enforced, not advisory."
+        )
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method}).encode()
+    req = urllib.request.Request(
+        url, data=body,
+        headers={"user-agent": UA, "content-type": "application/json",
+                 "accept": "application/json, text/event-stream"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        raw = r.read().decode("utf-8", "replace")
+    # 有的 server 走 SSE
+    if raw.lstrip().startswith("event:") or "\ndata: " in raw:
+        for line in raw.splitlines():
+            if line.startswith("data: "):
+                raw = line[6:]
+                break
+    return json.loads(raw)
 
 
 def _github_token() -> str | None:
@@ -72,24 +99,10 @@ def _get(url: str, headers: dict | None = None, timeout: int = 40) -> bytes:
 
 # ------------------------------------------------------------------ 输入模式
 def from_endpoint(url: str) -> tuple[list[dict], list[S.Finding]]:
-    """连一个活的 MCP server,只调 tools/list。"""
-    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
-    req = urllib.request.Request(
-        url, data=body,
-        headers={"user-agent": UA, "content-type": "application/json",
-                 "accept": "application/json, text/event-stream"},
-    )
-    with urllib.request.urlopen(req, timeout=40) as r:
-        raw = r.read().decode("utf-8", "replace")
-    # 有的 server 走 SSE
-    if raw.lstrip().startswith("event:") or "\ndata: " in raw:
-        for line in raw.splitlines():
-            if line.startswith("data: "):
-                raw = line[6:]
-                break
-    d = json.loads(raw)
+    """连一个活的 MCP server。只走 _rpc,越界方法发不出去。"""
+    d = _rpc(url, "tools/list")
     tools = (d.get("result") or {}).get("tools") or []
-    return tools, []
+    return [t for t in tools if isinstance(t, dict)], []
 
 
 def from_json_file(path: str) -> tuple[list[dict], list[S.Finding]]:
@@ -101,9 +114,10 @@ def from_json_file(path: str) -> tuple[list[dict], list[S.Finding]]:
 
 
 def _iter_local_texts(root: str):
-    skip = {".git", "node_modules", "__pycache__", "dist", "build", ".venv", "target"}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in skip]
+        # 与 is_test_path 用同一份判据 —— 两处列表分头维护必然漂移
+        dirnames[:] = [d for d in dirnames
+                       if d != ".git" and d not in BUILD_DIRS and d not in TEST_DIRS]
         for fn in filenames:
             if os.path.splitext(fn)[1].lower() in TEXT_EXT | CODE_EXT:
                 p = os.path.join(dirpath, fn)
@@ -126,11 +140,16 @@ def from_local(root: str) -> tuple[list[dict], list[S.Finding]]:
 TEST_MARKERS = ("_test.", ".test.", ".spec.", "test_")
 TEST_DIRS = {"test", "tests", "__tests__", "testdata", "fixtures",
              "examples", "example", "e2e", "mocks", "__mocks__"}
+# 构建产物与 vendor 副本是同一份源码的拷贝。扫它们只会把每个工具数两遍,
+# 并把同一个发现报两次。
+BUILD_DIRS = {"build", "dist", "vendor", "vendored", "third_party", "out",
+              "site-packages", ".tox", ".venv", "venv", "target",
+              "node_modules", "bower_components", ".next", ".nuxt", "__pycache__"}
 
 
 def is_test_path(rel: str) -> bool:
     parts = rel.replace("\\", "/").split("/")
-    if any(p in TEST_DIRS for p in parts):
+    if any(p in TEST_DIRS or p in BUILD_DIRS or p.endswith(".egg-info") for p in parts):
         return True
     base = parts[-1]
     return any(m in base for m in TEST_MARKERS)
@@ -164,8 +183,6 @@ def from_github(url: str) -> tuple[list[dict], list[S.Finding]]:
                 continue
             rel = member.name.split("/", 1)[-1]
             if os.path.splitext(rel)[1].lower() not in TEXT_EXT | CODE_EXT:
-                continue
-            if any(part in rel.split("/") for part in ("node_modules", "dist", "build")):
                 continue
             fh = tf.extractfile(member)
             if not fh:
