@@ -1,0 +1,102 @@
+name: 'toolfence'
+description: 'Audit MCP server tool definitions for missing guardrails. Read-only; never executes the code it scans.'
+author: 'dhb520cat'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'Directory to scan. Defaults to the checked-out repository.'
+    required: false
+    default: '.'
+  fail-on:
+    description: 'Fail the job at this severity or above: critical, high, medium, low, never.'
+    required: false
+    default: 'critical'
+  format:
+    description: 'Output format: text or json.'
+    required: false
+    default: 'text'
+
+outputs:
+  findings:
+    description: 'Total number of findings.'
+    value: ${{ steps.scan.outputs.findings }}
+  critical:
+    description: 'Number of critical findings.'
+    value: ${{ steps.scan.outputs.critical }}
+  tools:
+    description: 'Number of tool definitions extracted. Zero means nothing was found to scan.'
+    value: ${{ steps.scan.outputs.tools }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Run toolfence
+      id: scan
+      shell: bash
+      env:
+        TF_PATH: ${{ inputs.path }}
+        TF_FAIL_ON: ${{ inputs.fail-on }}
+        TF_FORMAT: ${{ inputs.format }}
+      run: |
+        set -uo pipefail
+        SRC="${{ github.action_path }}"
+
+        # JSON 用于取指标,同时按请求的格式渲染给日志看
+        python3 -m toolfence.cli "$TF_PATH" --json --fail-on never > /tmp/tf.json
+        rc_json=$?
+        if [ $rc_json -ne 0 ]; then
+          echo "::error::toolfence failed to run"
+          cat /tmp/tf.json
+          exit 1
+        fi
+
+        python3 - <<'PY' >> "$GITHUB_OUTPUT"
+        import json, os
+        d = json.load(open("/tmp/tf.json"))
+        f = d["findings"]
+        print(f"findings={len(f)}")
+        print(f"critical={sum(1 for x in f if x['severity'] == 'critical')}")
+        print(f"tools={d['tools']}")
+        PY
+
+        if [ "$TF_FORMAT" = "json" ]; then
+          cat /tmp/tf.json
+        else
+          python3 -m toolfence.cli "$TF_PATH" --fail-on never
+        fi
+
+        # Step Summary:让结果出现在 PR 的检查页,而不是埋在日志里
+        python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+        import json, os, collections
+        d = json.load(open("/tmp/tf.json"))
+        f = d["findings"]
+        print("## toolfence\n")
+        print(f"`{d['tools']}` tool definitions scanned.\n")
+        if not f:
+            print("No findings. Note that this means these seven rules did not fire — "
+                  "and a tool count of 0 means nothing could be extracted.")
+        else:
+            c = collections.Counter(x["severity"] for x in f)
+            print("| severity | count |\n|---|---|")
+            for s in ("critical", "high", "medium", "low"):
+                if c[s]:
+                    print(f"| {s} | {c[s]} |")
+            print("\n| severity | rule | where | finding |\n|---|---|---|---|")
+            for x in f[:40]:
+                where = x["where"].replace("|", "\\|")
+                summ = x["summary"].replace("|", "\\|")
+                print(f"| {x['severity']} | `{x['rule']}` | `{where}` | {summ} |")
+            if len(f) > 40:
+                print(f"\n…and {len(f) - 40} more.")
+        PY
+
+        # 按 fail-on 决定退出码
+        python3 -m toolfence.cli "$TF_PATH" --json --fail-on "$TF_FAIL_ON" > /dev/null

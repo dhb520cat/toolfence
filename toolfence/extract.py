@@ -4,12 +4,14 @@
   TS   server.registerTool("name", { description, inputSchema, annotations }, handler)
   TS   { name: "...", description: "...", inputSchema: {...} }   (数组风格)
   Py   @mcp.tool() / types.Tool(name=..., description=...)
+  Py   TOOLS = [{"name": ..., "description": ..., "inputSchema": {...}}]
   Go   mcp.Tool{ Name: "...", Description: ..., Annotations: &mcp.ToolAnnotations{...} }
 
 只做词法级提取,不执行任何代码。提不准就不提 —— 宁可漏,不可错报。
 """
 from __future__ import annotations
 
+import ast
 import re
 
 # ── TS: server.registerTool("name", { ... }, handler) ────────────────────────
@@ -203,6 +205,47 @@ def _py_docstring(tail: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+def _py_dict_literals(text: str) -> list[dict]:
+    """认出 Python 里以字典字面量声明的工具清单。
+
+    手写 JSON-RPC 的 server 常这样写:
+        TOOLS = [{"name": "x", "description": "y", "inputSchema": {...}}]
+
+    用 ast **解析**,从不 eval —— 这个工具的全部意义就是不执行它读的东西。
+    只接受纯字面量;含变量或函数调用的字典跳过,宁可漏也不猜。
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    out: list[dict] = []
+
+    def literal(node):
+        try:
+            return ast.literal_eval(node)
+        except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+            return None
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.List, ast.Tuple)):
+            continue
+        for el in node.elts:
+            if not isinstance(el, ast.Dict):
+                continue
+            keys = [k.value for k in el.keys
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str)]
+            if "name" not in keys:
+                continue
+            if not ({"description", "inputSchema", "input_schema"} & set(keys)):
+                continue
+            d = literal(el)
+            if not isinstance(d, dict) or not isinstance(d.get("name"), str):
+                continue
+            out.append(d)
+    return out
+
+
 def from_source(text: str, rel: str) -> list[dict]:
     """返回 tools/list 形状的 dict 列表。"""
     tools: list[dict] = []
@@ -243,6 +286,10 @@ def from_source(text: str, rel: str) -> list[dict]:
         for m in PY_DECORATOR.finditer(text):
             tail = text[m.end():]
             add(m.group("name"), _py_docstring(tail), _py_params(tail))
+        for d in _py_dict_literals(text):
+            schema = d.get("inputSchema") or d.get("input_schema") or {}
+            props = list((schema.get("properties") or {})) if isinstance(schema, dict) else []
+            add(d["name"], d.get("description", "") or "", props, d.get("annotations"))
         for m in PY_TYPES_TOOL.finditer(text):
             blk = text[m.start():m.start() + 1200]
             d = re.search(r'description\s*=\s*(?:\(\s*)?["\']{1,3}(.*?)["\']{1,3}', blk, re.S)

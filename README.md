@@ -10,6 +10,17 @@ toolfence tools.json                        # scan a tools/list export
 toolfence --endpoint https://host/mcp       # live server — calls tools/list only
 ```
 
+Or in CI, where it runs on every pull request:
+
+```yaml
+- uses: dhb520cat/toolfence@v0
+  with:
+    fail-on: critical
+```
+
+Findings land in the job summary, and `findings` / `critical` / `tools` are
+exposed as step outputs.
+
 It is also an MCP server, so an agent can audit a server before trusting it:
 
 ```json
@@ -131,7 +142,7 @@ exit code, so it drops into CI as-is.
 ## Tests
 
 ```bash
-python3 test_toolfence.py      # 62 assertions, 25 true negatives, plus a self-audit
+python3 test_toolfence.py      # 68 assertions, 25 true negatives, plus a self-audit
 ```
 
 MIT.

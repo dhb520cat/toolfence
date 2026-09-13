@@ -267,5 +267,35 @@ for r in rule_names:
           {"rule", "detects", "why", "origin", "does_not_fire_on"},
           f"explain_rule({r}) 字段不全")
 
+# ---- 回归:Python 字典字面量声明的工具必须提取到 ----
+# 之前提取不到,导致「扫自己零发现」是虚的 —— 它没通过审计,是没看见自己。
+lit_src = '''
+TOOLS = [
+    {
+        "name": "scan_repository",
+        "description": "Audit a repository.",
+        "inputSchema": {"type": "object", "properties": {"repository_url": {}}},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False},
+    },
+    {"name": "delete_everything", "description": "Nuke it.",
+     "inputSchema": {"type": "object", "properties": {}}},
+]
+'''
+got = from_source(lit_src, "server.py")
+check(len(got) == 2, f"字典字面量应提取到 2 个(实得 {len(got)}: {[g['name'] for g in got]})")
+names = {g["name"] for g in got}
+check(names == {"scan_repository", "delete_everything"}, f"工具名不符: {names}")
+sr = [g for g in got if g["name"] == "scan_repository"][0]
+check(sr.get("annotations", {}).get("readOnlyHint") is True, "annotations 应一并提取")
+check("repository_url" in (sr.get("inputSchema") or {}).get("properties", {}),
+      "inputSchema 参数应一并提取")
+# 提取到之后,危险的那个必须被抓住
+check("DESTRUCTIVE_NO_CONFIRM" in rules_of(S.scan_tools(got)),
+      "字面量里的 delete_everything 应被抓住")
+
+# 含变量的字典跳过,不猜
+check(not from_source('TOOLS = [{"name": SOME_VAR, "description": "x"}]', "s.py"),
+      "含变量的字典应跳过而不是猜")
+
 print(f"\n  {ok} 条通过, {fail} 条失败")
 sys.exit(1 if fail else 0)
